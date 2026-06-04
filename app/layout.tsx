@@ -8,8 +8,9 @@ const openSans = Open_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "D-ID Avatar MVP",
-  description: "Real-time D-ID digital human, ready for ElevenLabs Agents.",
+  title: "CardBuddy",
+  description:
+    "A digital human that sees your Pokémon cards and tells you what they're worth.",
 };
 
 export default function RootLayout({

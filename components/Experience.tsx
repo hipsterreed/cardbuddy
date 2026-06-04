@@ -7,12 +7,28 @@ import DidAvatar, {
   type DidStatus,
 } from "@/components/DidAvatar";
 import Webcam, { type WebcamHandle } from "@/components/Webcam";
+import Landing from "@/components/Landing";
+import { PokeBall } from "@/components/PokeBall";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { useSpeech } from "@/lib/useSpeech";
 
-type Turn = { id: string; role: "user" | "assistant"; text: string };
+type CardInfo = {
+  name: string;
+  set: string;
+  number: string;
+  rarity: string;
+  market: number | null;
+  image: string | null;
+  url: string | null;
+};
+type Turn = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  card?: CardInfo | null;
+};
 
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -35,6 +51,7 @@ function friendlyError(code?: string, detail?: string) {
 export default function Experience() {
   const didRef = useRef<DidAvatarHandle>(null);
   const webcamRef = useRef<WebcamHandle>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const speakTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [started, setStarted] = useState(false);
@@ -62,10 +79,14 @@ export default function Experience() {
     setStarted(true);
   }, []);
 
-  // Connect only after <DidAvatar> has mounted (so didRef is attached).
   useEffect(() => {
     if (started) void didRef.current?.connect();
   }, [started]);
+
+  // Keep the transcript pinned to the latest message.
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [turns, interim, busy]);
 
   const stop = useCallback(async () => {
     await didRef.current?.disconnect();
@@ -110,7 +131,12 @@ export default function Experience() {
         }
         setTurns((t) => [
           ...t,
-          { id: crypto.randomUUID(), role: "assistant", text: data.text },
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            text: data.text,
+            card: data.card ?? null,
+          },
         ]);
 
         setSpeaking(true);
@@ -160,39 +186,27 @@ export default function Experience() {
     );
   }
 
-  // ── Landing (gesture needed for camera/mic + autoplay) ────────────
+  // ── Landing ───────────────────────────────────────────────────────
   if (!started) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-7 px-6 text-center">
-        <div className="space-y-3">
-          <h1 className="text-4xl font-semibold tracking-tight text-foreground">
-            Avatar that sees you
-          </h1>
-          <p className="mx-auto max-w-md text-muted-foreground">
-            A digital human with an ElevenLabs voice that can watch your webcam
-            and react. Start it, then just talk.
-          </p>
-        </div>
-        <Button onClick={start} className="h-12 px-8 text-base">
-          Start conversation
-        </Button>
-      </div>
-    );
+    return <Landing onStart={start} />;
   }
 
   const badge = speaking
     ? { label: "Speaking", cls: "bg-primary text-primary-foreground" }
     : listening
       ? { label: "● Listening", cls: "bg-emerald-500 text-white" }
-      : { label: "Live", cls: "bg-primary/80 text-primary-foreground" };
+      : { label: "Live", cls: "bg-primary/85 text-primary-foreground" };
 
-  // ── Live experience (loading overlay until the stream is up) ──────
+  // ── Live (full screen; only the transcript scrolls) ───────────────
   return (
-    <div className="relative mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 p-4">
-      <header className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-foreground">
-          Avatar that sees you
-        </h1>
+    <div className="relative flex h-screen flex-col gap-3 overflow-hidden p-4">
+      <header className="flex shrink-0 items-center justify-between">
+        <div className="flex items-center gap-2">
+          <PokeBall className="h-6 w-6" />
+          <h1 className="text-lg font-bold tracking-tight text-foreground">
+            CardBuddy
+          </h1>
+        </div>
         <div className="flex gap-2">
           {micSupported && (
             <Button
@@ -209,10 +223,10 @@ export default function Experience() {
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,360px)_1fr]">
-        {/* Left column: avatar over webcam, same size */}
-        <div className="flex flex-col gap-4">
-          <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-zinc-900 ring-1 ring-primary/20">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
+        {/* Left: avatar over webcam, equal halves */}
+        <div className="flex shrink-0 gap-3 lg:w-[240px] lg:flex-col lg:justify-center">
+          <div className="relative aspect-square min-h-0 flex-1 overflow-hidden rounded-xl bg-zinc-900 ring-1 ring-primary/30 lg:flex-none">
             <DidAvatar
               ref={didRef}
               onStatusChange={setStatus}
@@ -226,7 +240,7 @@ export default function Experience() {
             </span>
           </div>
 
-          <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-black ring-1 ring-border">
+          <div className="relative aspect-square min-h-0 flex-1 overflow-hidden rounded-xl bg-black ring-1 ring-border lg:flex-none">
             <Webcam ref={webcamRef} onError={setError} />
             <span className="absolute bottom-2 left-2 rounded bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white">
               You
@@ -234,23 +248,27 @@ export default function Experience() {
           </div>
         </div>
 
-        {/* Right: transcript */}
-        <Card className="flex min-h-0 flex-col gap-0 py-0">
-          <div className="border-b border-border px-4 py-3 text-sm font-medium text-foreground">
-            Transcript
+        {/* Right: transcript (scrolls) */}
+        <Card className="flex min-h-0 flex-1 flex-col gap-0 py-0">
+          <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3 text-sm font-semibold text-foreground">
+            <PokeBall className="h-4 w-4" />
+            Card notes
           </div>
-          <div className="flex-1 space-y-3 overflow-y-auto p-4">
+          <div
+            ref={scrollRef}
+            className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4"
+          >
             {turns.length === 0 && !interim && (
               <p className="text-sm text-muted-foreground">
                 {micMuted
                   ? "Mic muted — type below, or unmute to talk."
-                  : "Just talk — it can see you through the camera."}
+                  : "Hold a card up to the camera and I'll tell you all about it."}
               </p>
             )}
             {turns.map((t) => (
               <div
                 key={t.id}
-                className={`flex ${t.role === "user" ? "justify-end" : "justify-start"}`}
+                className={`flex flex-col gap-2 ${t.role === "user" ? "items-end" : "items-start"}`}
               >
                 <div
                   className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm ${
@@ -261,6 +279,40 @@ export default function Experience() {
                 >
                   {t.text}
                 </div>
+                {t.card && (
+                  <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-2 pr-4 shadow-sm">
+                    {t.card.image && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={t.card.image}
+                        alt={t.card.name}
+                        className="h-28 w-auto rounded-md"
+                      />
+                    )}
+                    <div className="space-y-0.5">
+                      <div className="text-sm font-semibold text-foreground">
+                        {t.card.name}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {[
+                          t.card.set,
+                          t.card.number && `#${t.card.number}`,
+                          t.card.rarity,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </div>
+                      {t.card.market != null && (
+                        <div className="pt-1 text-xl font-extrabold text-primary">
+                          ~${Math.round(t.card.market)}{" "}
+                          <span className="text-xs font-normal text-muted-foreground">
+                            market
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
             {interim && (
@@ -271,10 +323,9 @@ export default function Experience() {
               </div>
             )}
             {busy && (
-              <div className="flex justify-start">
-                <div className="rounded-2xl bg-muted px-4 py-2 text-sm text-muted-foreground">
-                  …
-                </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <PokeBall spinning className="h-4 w-4" />
+                Appraising…
               </div>
             )}
           </div>
@@ -286,7 +337,7 @@ export default function Experience() {
           )}
 
           <form
-            className="flex gap-2 border-t border-border p-3"
+            className="flex shrink-0 gap-2 border-t border-border p-3"
             onSubmit={(e) => {
               e.preventDefault();
               void send(input);
@@ -310,9 +361,9 @@ export default function Experience() {
         </Card>
       </div>
 
-      {/* Full-cover loading / error until the live stream is up */}
+      {/* Loading / error overlay until the stream is up */}
       {!live && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 rounded-xl bg-background px-6 text-center">
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-background px-6 text-center">
           {status === "error" ? (
             <>
               <p className="text-lg font-medium text-foreground">
@@ -327,9 +378,9 @@ export default function Experience() {
             </>
           ) : (
             <>
-              <div className="h-12 w-12 animate-spin rounded-full border-4 border-muted border-t-primary" />
+              <PokeBall spinning className="h-16 w-16" />
               <p className="text-lg font-medium text-foreground">
-                Waking up your avatar…
+                Waking up your appraiser…
               </p>
               <p className="text-sm text-muted-foreground">
                 Connecting the live video stream
